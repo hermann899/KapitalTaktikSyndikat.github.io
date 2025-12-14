@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+
+<title>KTS — Trading Simulator (Realtime) mit TP/SL & Long/Short</title>
+
+<!-- Tailwind (CDN) für Layout -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  :root{
+    --bg-1: #071026;
+    --bg-2: #0b1220;
+    --panel-bg: rgba(255,255,255,0.03);
+    --muted: #9ca3af;
+    --neon-cyan: #00ffe1;
+    --neon-magenta: #ff4dd2;
+    --accent: #7c5cff;
+    --bg-logo: none; /* wird per JS gesetzt */
+    --base-font-size: 16px;
+  }
+
+  /* -------------------------
+     Accessibility + Mobile fixes
+     ------------------------- */
+  html { font-size: var(--base-font-size); }
+  body {
+    min-height: 100dvh; /* berücksichtigt dynamische Viewport-Height auf Mobilgeräten */
+    overscroll-behavior: none; /* verhindert unerwartetes Scroll-Rumbling bei Keyboard */
+    padding-bottom: env(safe-area-inset-bottom); /* iPhone safe area */
+    padding-top: env(safe-area-inset-top);
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+  }
+
+  /* make buttons/touch targets big enough and disable tap highlight */
+  button, input, select, .clickable {
+    touch-action: manipulation;        /* verhindert 300ms-Delay auf manchen Browsern */
+    -webkit-tap-highlight-color: transparent;
+  }
+  button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* only apply :hover visual effects on devices that actually support hover */
+  @media (hover: hover) {
+    .logo-wrap:hover img{ transform: translateY(-3px) rotate(-3deg); }
+  }
+  /* remove hover-transitions on touch devices (keeps UI from "sticking") */
+  @media (hover: none) {
+    .logo-wrap img { transition: transform .0s ease; }
+  }
+
+  /* allow smooth native scrolling for lists on mobile */
+  #marketList, #portfolioList {
+    -webkit-overflow-scrolling: touch;
+  }
+
+/* -------------------------
+   GOLD-TITLE (top-center) mit eleganter zufälliger Gold-Animation
+   ------------------------- */
+#goldTitle {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  pointer-events: none;
+  font-weight: 800;
+  font-size: 70px;
+  letter-spacing: 0.6px;
+  line-height: 1;
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px) saturate(.95);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border: 1px solid rgba(255,255,255,0.02);
+}
+#goldTitle .gtext {
+  display: inline-block;
+  background-image:
+    linear-gradient(120deg, #ffd700 0%, #ffbf00 20%, #ffaa00 40%, #e6a300 60%, #b8860b 80%, #a37500 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  position: relative;
+  text-shadow:
+    0 1px 0 rgba(0,0,0,0.55),
+    0 4px 20px rgba(0,0,0,0.45),
+    0 0 12px rgba(220,180,45,0.12);
+  filter: drop-shadow(0 6px 18px rgba(0,0,0,0.55));
+  animation: goldColorShift 10s ease-in-out infinite alternate;
+}
+
+/* moderner, kräftiger Gold-/Gelb-/Braun-Farbwechsel */
+@keyframes goldColorShift {
+  0%   { filter: hue-rotate(0deg) brightness(1); }
+  15%  { filter: hue-rotate(5deg) brightness(1.58); }
+  30%  { filter: hue-rotate(-5deg) brightness(0.95); }
+  45%  { filter: hue-rotate(8deg) brightness(1.42); }
+  60%  { filter: hue-rotate(-8deg) brightness(1.2); }
+  75%  { filter: hue-rotate(3deg) brightness(1.45); }
+  100% { filter: hue-rotate(0deg) brightness(1.2); }
+}
+
+
+
+/* responsive gold title sizes */
+@media (max-width: 1280px) { #goldTitle { font-size: 56px; } }
+@media (max-width: 1024px) { #goldTitle { font-size: 44px; top: 10px;} }
+@media (max-width: 768px)  { #goldTitle { font-size: 34px; padding: 4px 8px; } }
+@media (max-width: 480px)  { #goldTitle { font-size: 26px; padding: 3px 6px; } }
+
+  /* -------------------------
+     Base layout + visuals
+     ------------------------- */
+  html,body,#app { height:100%; margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; }
+  body{
+    background: radial-gradient(1200px 400px at 10% 10%, rgba(124,92,255,0.06), transparent 5%),
+                radial-gradient(800px 300px at 95% 90%, rgba(0,255,225,0.03), transparent 2%),
+                linear-gradient(180deg,var(--bg-1), var(--bg-2));
+    color: #e6eef8;
+  }
+  #app { position: relative; z-index: 2; min-height:100vh; }
+
+  header{
+    backdrop-filter: blur(6px);
+    background: linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01));
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    position: relative;
+    z-index: 3;
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo-wrap{
+    width:56px; height:56px; border-radius:12px; padding:6px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    box-shadow: 0 6px 30px rgba(3,10,23,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .logo-wrap img{ width:44px; height:44px; object-fit:contain; border-radius:8px; transition: transform .25s ease; }
+
+  .neon-line {
+    height:2px; width:100%;
+    background: linear-gradient(90deg, transparent, var(--neon-cyan), var(--neon-magenta), transparent);
+    opacity:0.12; filter: blur(6px); margin-top:6px; border-radius:2px;
+  }
+
+  .panel {
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border: 1px solid rgba(255,255,255,0.04);
+    box-shadow: 0 8px 30px rgba(2,6,15,0.6);
+    border-radius:12px;
+    overflow:hidden;
+    position: relative;
+    z-index: 3;
+  }
+
+  /* -------------------------
+     RESPONSIVE GRID (desktop / mobile switching)
+     ------------------------- */
+
+  /* desktop: three columns */
+  main.app-grid {
+    display: grid;
+    grid-template-columns: 320px 1fr 380px;
+    gap: 16px;
+    padding: 16px;
+    height: calc(100vh - 76px);
+  }
+
+  /* tablet: two columns (markets hidden as collapsed) */
+  @media (max-width: 1280px) {
+    main.app-grid { grid-template-columns: 280px 1fr 360px; gap:12px; padding:12px; height: calc(100vh - 72px); }
+  }
+
+  /* mobile: single column vertical stacking */
+  @media (max-width: 1100px) {
+    main.app-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      height: auto;
+      min-height: calc(100vh - 64px);
+    }
+    /* left aside (markets) becomes collapsible; hidden by default */
+    .left-aside { display: none; }
+    .right-aside { width: 100%; order: 2; }
+    .center-panel { order: 1; width: 100%; }
+    /* make chart smaller on phones */
+    #tv-chart { min-height: 320px; }
+  }
+
+  /* very small screens */
+  @media (max-width: 520px) {
+    #tv-chart { min-height: 240px; }
+    header { padding: 10px; }
+    .brand-title .title { font-size: 0.95rem; }
+    .brand-title .subtitle { font-size: 0.7rem; }
+  }
+
+  /* -------------------------
+     Left/center/right helpers (angepasst: Märkte-Block kompakter)
+     ------------------------- */
+  .left-aside {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100%;
+    padding-bottom: 1px;
+  }
+
+  /* Top-Section (Märkte) kompakt halten */
+  .left-aside .top-section {
+    padding: 8px 12px;      /* weniger Padding als vorher (p-4) */
+    flex: 0 0 auto;         /* nimmt nur den nötigen Platz */
+    min-height: 0;
+  }
+
+  /* Header-Reihe (Märkte / Realtime) enger machen */
+  .left-aside .top-section .flex.items-center {
+    gap: 6px;
+    align-items: center;
+  }
+  .left-aside .top-section .muted {
+    font-size: 0.65rem;    /* "Realtime" kleiner darstellen */
+    white-space: nowrap;
+    opacity: 0.9;
+  }
+
+  /* Market-Liste: begrenzte Höhe + Scroll */
+  #marketList {
+    max-height: 180px;     /* reduziert die Gesamthöhe des Markt-Blocks */
+    overflow-y: auto;
+    padding-right: 6px;
+    display: block;
+  }
+  /* kleinere Zeilen in der Market-Liste */
+  #marketList .market-row {
+    padding: 6px;          /* kompakter als 8px */
+  }
+
+  /* Portfolio-Bereich unverändert in Breite, bleibt flexibel */
+  .portfolio-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Portfolio-Liste scrollbar wie vorher */
+  #portfolioList {
+    overflow-y: auto;
+    padding-right: 8px;
+    min-height: 0;
+  }
+  #portfolioList::-webkit-scrollbar { width: 10px; }
+  #portfolioList::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 6px; }
+
+  .right-aside { padding: 16px; }
+  @media (max-width:1100px) {
+    .right-aside { padding: 12px; }
+  }
+
+  /* -------------------------
+     Buttons & inputs (responsive touch targets)
+     ------------------------- */
+  .pct-buttons { display:flex; gap:8px; align-items:center; }
+  .pct-buttons button {
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .12s ease, box-shadow .12s ease;
+    box-shadow: 0 6px 18px rgba(3,10,23,0.6);
+  }
+  .pct-buttons button:active { transform: translateY(1px); }
+  /* stronger contrast gradient */
+  .pct-buttons .pct-cta {
+    background: linear-gradient(90deg, #00c9ff 0%, #7c5cff 100%);
+    color: white;
+  }
+
+  /* mobile: stack buttons and make full width */
+  @media (max-width: 720px) {
+    .pct-buttons { flex-direction: row; gap: 6px; flex-wrap: wrap; }
+    .pct-buttons button { flex: 1 1 calc(25% - 6px); min-width: 68px; padding: 10px 8px; }
+    .pct-buttons button.full-mobile { flex-basis: 48%; }
+    .w-64, .w-48 { width: 100% !important; }
+  }
+
+  /* make BUY / SELL more prominent on mobile */
+  @media (max-width: 520px) {
+    .trade-actions button { width: 100%; padding: 12px; font-size: 1rem; }
+  }
+
+  /* -------------------------
+     Background watermark + lines
+     ------------------------- */
+  #backgroundLogo{
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+  #backgroundLogo::before{
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 65vmin;
+    height: 65vmin;
+    transform: translate(-50%, -45%);
+    background-image: var(--bg-logo);
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    opacity: 0.045;
+    filter: grayscale(30%) blur(0.4px) saturate(0.9);
+    mix-blend-mode: overlay;
+    transition: opacity .3s ease;
+  }
+  #backgroundLogo::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.003) 0px, rgba(255,255,255,0.003) 1px, transparent 1px, transparent 120px),
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.003) 0px, rgba(255,255,255,0.003) 1px, transparent 1px, transparent 120px);
+    opacity: 0.03;
+    pointer-events: none;
+  }
+  @media (max-width:900px) {
+    #backgroundLogo::before { width: 48vmin; height: 48vmin; opacity: 0.04; transform: translate(-50%, -48%); }
+  }
+
+  /* -------------------------
+     LOADER (FULLSCREEN)
+     ------------------------- */
+  #loader {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(4,8,16,0.6);
+    backdrop-filter: blur(6px) saturate(.9);
+    transition: opacity .28s ease, visibility .28s ease;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+  #loader.show { visibility: visible; opacity: 1; pointer-events: auto; }
+  .loader-card {
+    display:flex; align-items:center; gap:18px; min-width: 260px; padding: 20px 26px;
+    border-radius: 14px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border: 1px solid rgba(255,255,255,0.04); box-shadow: 0 10px 50px rgba(2,6,15,0.6);
+  }
+  .loader-visual { position: relative; width:86px; height:86px; display:flex; align-items:center; justify-content:center; border-radius:12px; }
+  .loader-visual img { width:56px; height:56px; object-fit:contain; border-radius:10px; }
+  /* responsive loader */
+  @media (max-width:520px) {
+    .loader-card { padding: 14px 16px; gap:12px; min-width: 220px; }
+    .loader-visual { width:66px; height:66px; }
+  }
+
+  /* misc */
+  .muted { color:var(--muted); }
+  .green { color:#10b981; } .red { color:#ef4444; }
+  .lot-row { border-top: 1px dashed rgba(255,255,255,0.03); padding-top:8px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<!-- background watermark -->
+<div id="backgroundLogo"></div>
+
+<!-- GOLD TITLE (top center) -->
+<div id="goldTitle" aria-hidden="true">
+  <span class="gtext" data-text="KapitalTaktik-Syndikat">KapitalTaktik-Syndikat<span class="extraLine"></span></span>
+</div>
+
+<!-- LOADER -->
+<div id="loader" aria-hidden="true">
+  <div class="loader-card" role="status" aria-live="polite">
+    <div class="loader-visual" aria-hidden="true">
+      <svg class="loader-ring" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" >
+        <circle cx="50" cy="50" r="38" stroke="rgba(124,92,255,0.9)" stroke-width="3.2" fill="none" stroke-linecap="round"></circle>
+        <circle cx="50" cy="50" r="30" class="alt" stroke="rgba(0,255,225,0.9)" stroke-width="1.6" fill="none" stroke-linecap="round"></circle>
+      </svg>
+      <img id="loaderLogo" src="" alt="Logo">
+    </div>
+    <div>
+      <div class="loader-text" id="loaderMain">Lade KTS…</div>
+      <div class="loader-sub" id="loaderSub">Bitte einen Moment — Chart & Preise werden geladen</div>
+    </div>
+  </div>
+</div>
+
+<div id="app" class="h-full">
+  <header class="flex items-center justify-between px-6 py-4">
+    <div class="flex items-center gap-4">
+      <div class="logo-wrap panel" title="KTS Logo">
+        <img id="logoImg" src="" alt="Logo">
+      </div>
+      <div class="brand-title">
+        <span class="title font-semibold">KTS</span>
+        <span class="subtitle muted">Trading</span>
+        <div class="neon-line"></div>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-6">
+      <div class="text-right">
+        <div class="text-xs muted">Kontostand (USD)</div>
+<div id="balanceDisplay" class="text-xl font-semibold" contenteditable="true">$10,000.00</div>
+
+      </div>
+      <div class="text-right">
+        <div class="text-xs muted">Unrealized PnL</div>
+        <div id="unrealizedDisplay" class="text-lg">—</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- main content grid -->
+  <main class="app-grid" role="main">
+    <!-- LEFT: markets -->
+    <aside class="left-aside panel p-0" aria-label="Märkte und Portfolio">
+      <div class="accent-top"></div>
+      <div class="top-section p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold">Märkte</h3>
+          <div class="text-xs muted">Realtime</div>
+        </div>
+        <div id="marketList" class="space-y-2"></div>
+      </div>
+
+      <div class="portfolio-section p-4 border-t border-gray-800">
+        <h4 class="font-medium mb-2">Portfolio (Lots)</h4>
+        <div id="portfolioList" class="space-y-2 text-sm muted">Noch keine Positionen</div>
+      </div>
+
+      <div class="p-4 border-t" style="opacity:0.9">
+        <div class="chip">Neon UI • Lots / Einzel-Schließen</div>
+      </div>
+    </aside>
+
+    <!-- CENTER: chart -->
+    <section class="center-panel flex flex-col panel p-0" style="min-width:0;">
+      <div class="accent-top"></div>
+      <div id="tv-chart" class="p-4" style="flex:1; min-height:420px;"></div>
+
+      <div class="flex items-center gap-3 p-4 border-t" style="border-top:1px solid rgba(255,255,255,0.03); flex-wrap:wrap;">
+        <div class="flex-1 min-w-[160px]">
+          <div class="text-xs muted">Aktuelles Symbol</div>
+          <div id="symbolLabel" class="text-lg font-semibold">BINANCE:BTCUSDT</div>
+        </div>
+
+        <div class="w-64 min-w-[220px]">
+          <div class="text-xs muted">Betrag (USD)</div>
+          <input id="usdInput" type="number" class="w-full p-2 rounded bg-[#071425] text-white border border-transparent focus:border-[rgba(124,92,255,0.6)] outline-none" placeholder="z. B. 100" />
+          <div class="pct-buttons mt-2">
+            <button class="pct-cta px-3 py-2 rounded text-white font-semibold" onclick="quickPctBuy(25)">25%</button>
+            <button class="pct-cta px-3 py-2 rounded text-white font-semibold" onclick="quickPctBuy(50)">50%</button>
+            <button class="pct-cta px-3 py-2 rounded text-white font-semibold" onclick="quickPctBuy(75)">75%</button>
+            <button class="pct-cta px-3 py-2 rounded text-white font-semibold" onclick="quickPctBuy(100)">MAX</button>
+          </div>
+        </div>
+
+<div class="w-48 min-w-[160px]">
+  <div class="text-xs muted">Positions-Typ</div>
+  <select id="posType" class="w-full p-2 rounded bg-[#0a1a36] text-white border border-[rgba(124,92,255,0.6)] focus:border-[rgba(124,92,255,1)] outline-none">
+    <option value="LONG">Long (Buy to Open)</option>
+    <option value="SHORT">Short (Sell to Open)</option>
+  </select>
+</div>
+
+<div class="w-48 min-w-[160px]">
+  <div class="text-xs muted">Take Profit (%)</div>
+  <input id="tpInput" type="number" step="0.01" min="0" class="w-full p-2 rounded bg-[#0a1a36] text-white border border-[rgba(124,92,255,0.6)] focus:border-[rgba(124,92,255,1)] outline-none" placeholder="z. B. 2" />
+</div>
+
+<div class="w-48 min-w-[160px]">
+  <div class="text-xs muted">Stop Loss (%)</div>
+  <input id="slInput" type="number" step="0.01" min="0" class="w-full p-2 rounded bg-[#0a1a36] text-white border border-[rgba(124,92,255,0.6)] focus:border-[rgba(124,92,255,1)] outline-none" placeholder="z. B. 1" />
+</div>
+
+<div class="w-48 min-w-[160px]">
+  <div class="text-xs muted">Leverage (x)</div>
+  <input id="leverage" type="number" step="1" min="1" value="1" class="w-full p-2 rounded bg-[#0a1a36] text-white border border-[rgba(124,92,255,0.6)] focus:border-[rgba(124,92,255,1)] outline-none" />
+</div>
+
+        <div class="w-48 text-center min-w-[160px]">
+          <div class="text-xs muted">Marktpreis (Realtime)</div>
+          <div id="priceLabel" class="text-lg font-semibold">$0.00</div>
+          <div class="text-xs muted" id="priceTime"></div>
+        </div>
+
+        <div class="trade-actions flex flex-col gap-2 min-w-[130px]">
+          <!-- BUY = open long OR close short (depending on posType) -->
+          <button id="buyBtn" class="px-4 py-2 rounded bg-gradient-to-r from-green-300 to-green-200 text-black font-semibold" onclick="onBuyClick()">BUY</button>
+          <!-- SELL = open short OR close long (depending on posType) -->
+          <button id="sellBtn" class="px-4 py-2 rounded bg-gradient-to-r from-red-300 to-red-200 text-black font-semibold" onclick="onSellClick()">SELL</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: details -->
+    <aside class="right-aside panel w-96 p-4" aria-label="Details und Orders">
+      <div>
+        <h4 class="font-semibold mb-2">Position Details</h4>
+        <div id="positionBox" class="text-sm muted">Keine offene Position</div>
+      </div>
+
+      <div class="mt-4">
+        <h4 class="font-semibold mb-2">Statistiken</h4>
+        <div class="grid grid-cols-2 gap-2 text-sm small muted">
+          <div>Net Worth</div><div id="netWorth">$10,000.00</div>
+          <div>Realized PnL</div><div id="realizedPnL">$0.00</div>
+          <div>Positionswert</div><div id="positionValue">$0.00</div>
+          <div>Avg. Buy Price (gewichtet)</div><div id="avgPrice">—</div>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <h4 class="font-semibold mb-2">Speicherung</h4>
+        <div class="text-sm muted space-x-2 mb-2">
+          <button class="px-2 py-1 bg-gray-700 rounded" onclick="exportState()">Exportieren (JSON)</button>
+          <button class="px-2 py-1 bg-gray-700 rounded" onclick="importState()">Importieren (JSON)</button>
+          <button class="px-2 py-1 bg-gray-700 rounded" onclick="clearState()">Reset</button>
+        </div>
+      </div>
+
+      <div class="right-order mt-auto">
+        <h4 class="font-medium mb-2">Order History</h4>
+        <div id="orderHistory" class="text-sm muted">Noch keine Orders</div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<!-- TradingView -->
+<script src="https://s3.tradingview.com/tv.js"></script>
+
+<script>
+/* ===========================
+   Logo + background setup
+   =========================== */
+   const balanceDiv = document.getElementById('balanceDisplay');
+let isEditingBalance = false;
+
+/* Desktop edit (contenteditable) listeners */
+balanceDiv.addEventListener('focus', () => {
+  isEditingBalance = true;
+});
+
+balanceDiv.addEventListener('blur', () => {
+  isEditingBalance = false;
+
+  let val = parseFloat(balanceDiv.innerText.replace(/[^0-9.-]+/g,""));
+  if(!isNaN(val)) {
+    state.balanceUSD = toFixedNumber(val, 2);
+    saveState();
+  }
+  renderAll();
+});
+
+/* Mobile: open prompt on click if contenteditable is removed (set in updateDeviceClass) */
+balanceDiv.addEventListener('click', (ev) => {
+  // only open mobile prompt if contenteditable is not present
+  if (!balanceDiv.isContentEditable) {
+    ev.preventDefault();
+    const cur = state.balanceUSD || 0;
+    const txt = prompt('Kontostand (USD):', cur.toString());
+    if (txt === null) return;
+    const num = parseFloat(txt.replace(/[^0-9.-]+/g,""));
+    if (!isNaN(num)) {
+      state.balanceUSD = toFixedNumber(num, 2);
+      saveState();
+      renderAll();
+    } else {
+      alert('Ungültiger Betrag');
+    }
+  }
+});
+
+const LOGO_URL = 'https://i.postimg.cc/sgDkwh87/new.jpg'; // <-- replace here
+document.getElementById && (document.getElementById('logoImg').src = LOGO_URL);
+document.getElementById && (document.getElementById('loaderLogo') && (document.getElementById('loaderLogo').src = LOGO_URL));
+document.documentElement.style.setProperty('--bg-logo', `url("${LOGO_URL}")`);
+
+/* inject background svg lines (keine Änderung nötig) */
+(function injectBgLines(){
+  const wrapper = document.getElementById('backgroundLogo');
+  if(!wrapper) return;
+  wrapper.innerHTML = `
+    <svg class="bg-lines" viewBox="0 0 1600 900" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="g1" x1="0" x2="1">
+          <stop offset="0" stop-color="#7c5cff" stop-opacity="0.8"/>
+          <stop offset="1" stop-color="#00ffe1" stop-opacity="0.8"/>
+        </linearGradient>
+        <linearGradient id="g2" x1="0" x2="1">
+          <stop offset="0" stop-color="#00ffe1" stop-opacity="0.6"/>
+          <stop offset="1" stop-color="#ff4dd2" stop-opacity="0.6"/>
+        </linearGradient>
+      </defs>
+      <g stroke="rgba(255,255,255,0.03)" stroke-width="1">
+        <path d="M0,200 L1600,0" />
+        <path d="M0,400 L1600,200" />
+        <path d="M0,600 L1600,400" />
+        <path d="M0,800 L1600,600" />
+      </g>
+      <path d="M-50,700 C250,520 650,480 950,560 C1250,640 1650,520 1750,420" stroke="url(#g1)" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.10"/>
+      <path d="M-50,300 C200,180 500,140 900,200 C1200,250 1500,220 1750,180" stroke="url(#g2)" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.07"/>
+      <g fill="#7c5cff" opacity="0.09">
+        <circle cx="350" cy="120" r="2.6"></circle>
+        <circle cx="1100" cy="720" r="2.2"></circle>
+        <circle cx="1400" cy="260" r="1.8"></circle>
+      </g>
+    </svg>
+  `;
+})();
+
+/* ===========================
+   Loader control (same as before)
+   =========================== */
+let loaderTimeout = null;
+function showLoader(mainText = 'Lade KTS…', subText = 'Bitte einen Moment — initialisiere Daten', keepVisibleMs = 4000) {
+  const loader = document.getElementById('loader');
+  if(!loader) return;
+  document.getElementById('loaderMain').innerText = mainText;
+  document.getElementById('loaderSub').innerText = subText;
+  loader.classList.add('show');
+  if(loaderTimeout) { clearTimeout(loaderTimeout); loaderTimeout = null; }
+  if(keepVisibleMs > 0) {
+    loaderTimeout = setTimeout(()=> { hideLoader(); loaderTimeout = null; }, keepVisibleMs + 1500);
+  }
+}
+function hideLoader() {
+  const loader = document.getElementById('loader');
+  if(!loader) return;
+  loader.classList.remove('show');
+  if(loaderTimeout) { clearTimeout(loaderTimeout); loaderTimeout = null; }
+}
+
+/* ===========================
+   Device detection helper
+   =========================== */
+function updateDeviceClass() {
+  const mobile = window.innerWidth <= 1100;
+  document.documentElement.classList.toggle('is-mobile', mobile);
+
+  // adapt chart height responsively
+  const chart = document.getElementById('tv-chart');
+  if(chart) {
+    if(window.innerWidth <= 520) chart.style.minHeight = '240px';
+    else if(window.innerWidth <= 720) chart.style.minHeight = '320px';
+    else chart.style.minHeight = '420px';
+  }
+
+  // ContentEditable: disable on mobile to avoid keyboard zoom/jumping
+  try {
+    if (mobile) {
+      balanceDiv.removeAttribute('contenteditable');
+      // visually ensure it's not focusable by keyboard on mobile
+      balanceDiv.setAttribute('aria-disabled', 'true');
+    } else {
+      balanceDiv.setAttribute('contenteditable', 'true');
+      balanceDiv.removeAttribute('aria-disabled');
+    }
+  } catch(e) { /* ignore */ }
+}
+window.addEventListener('resize', updateDeviceClass);
+window.addEventListener('orientationchange', () => setTimeout(updateDeviceClass, 200));
+
+/* ===========================
+   Helpers, state, markets
+   =========================== */
+function toFixedNumber(n, decimals=2) {
+  const factor = Math.pow(10, decimals);
+  return Math.round((Number(n) + Number.EPSILON) * factor) / factor;
+}
+function safeAdd(a,b, decimals=2) { return toFixedNumber(Number(a) + Number(b), decimals); }
+function safeSub(a,b, decimals=2) { return toFixedNumber(Number(a) - Number(b), decimals); }
+
+const markets = [
+  { label:'BTC / USDT', tv:'BINANCE:BTCUSDT', binance:'btcusdt', cg:'bitcoin' },
+  { label:'ETH / USDT', tv:'BINANCE:ETHUSDT', binance:'ethusdt', cg:'ethereum' },
+  { label:'BNB / USDT', tv:'BINANCE:BNBUSDT', binance:'bnbusdt', cg:'binancecoin' },
+  { label:'ADA / USDT', tv:'BINANCE:ADAUSDT', binance:'adausdt', cg:'cardano' },
+  { label:'XRP / USDT', tv:'BINANCE:XRPUSDT', binance:'xrpusdt', cg:'ripple' },
+  { label:'LTC / USDT', tv:'BINANCE:LTCUSDT', binance:'ltcusdt', cg:'litecoin' }
+];
+
+let state = {
+  balanceUSD: 10000.00,
+  portfolio: {},         // key: cg id -> { lots: [ { id, amount, buyPrice OR sellPrice, side: 'LONG'|'SHORT', usd, tpPct, slPct, tpPrice, slPrice, time } ] }
+  realizedPnL: 0,
+  leverageDefault: 1,
+  currentMarket: markets[0],
+  latestPrices: {},
+  orderHistory: []
+};
+
+let tvWidget = null;
+let binanceMultiWS = null;
+let wsOpen = false;
+let wsTimeout = null;
+
+/* persistence */
+const STORAGE_KEY = 'trading_sim_state_v1_lots_tp_sl_long_short';
+function saveState() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e){ } }
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw) {
+      const parsed = JSON.parse(raw);
+      state.balanceUSD = parsed.balanceUSD !== undefined ? parsed.balanceUSD : state.balanceUSD;
+      state.portfolio = parsed.portfolio !== undefined ? parsed.portfolio : state.portfolio;
+      state.realizedPnL = parsed.realizedPnL !== undefined ? parsed.realizedPnL : state.realizedPnL;
+      state.currentMarket = parsed.currentMarket !== undefined ? parsed.currentMarket : state.currentMarket;
+      state.latestPrices = parsed.latestPrices !== undefined ? parsed.latestPrices : state.latestPrices;
+      state.orderHistory = parsed.orderHistory !== undefined ? parsed.orderHistory : state.orderHistory;
+      for(const k in state.portfolio) if(!Array.isArray(state.portfolio[k].lots)) state.portfolio[k] = { lots: [] };
+    }
+  } catch(e) { console.warn('load failed', e); }
+}
+function clearState() { if(confirm('Reset simulation?')) { localStorage.removeItem(STORAGE_KEY); location.reload(); } }
+function exportState(){ const data = JSON.stringify(state, null, 2); const blob = new Blob([data], {type: 'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'trading-sim-state-lots-tpsl.json'; a.click(); URL.revokeObjectURL(url); }
+function importState(){ const txt = prompt('Füge JSON ein (oder leer abbrechen):'); if(!txt) return; try { const parsed = JSON.parse(txt); state.balanceUSD = parsed.balanceUSD !== undefined ? parsed.balanceUSD : state.balanceUSD; state.portfolio = parsed.portfolio !== undefined ? parsed.portfolio : state.portfolio; state.realizedPnL = parsed.realizedPnL !== undefined ? parsed.realizedPnL : state.realizedPnL; saveState(); renderAll(); alert('Importiert'); } catch(e){ alert('Ungültiges JSON'); } }
+
+/* TradingView init & setSymbol (with loader handling) */
+function initTradingView(symbol) {
+  const container = document.getElementById('tv-chart');
+  container.innerHTML = '';
+  showLoader('Lade Chart…', `Initialisiere ${symbol}`, 4200);
+  tvWidget = new TradingView.widget({
+    container_id: "tv-chart",
+    width: "100%",
+    height: "100%",
+    symbol: symbol,
+    interval: "15",
+    timezone: "Europe/Berlin",
+    theme: "dark",
+    style: "1",
+    locale: "de",
+    toolbar_bg: "#0b0e11",
+    allow_symbol_change: false,
+    enable_publishing: false,
+    studies: ["MASimple@tv-basicstudies"],
+    autosize: true
+  });
+  if(tvWidget && typeof tvWidget.onChartReady === 'function') {
+    tvWidget.onChartReady(() => setTimeout(()=> hideLoader(), 380));
+  } else setTimeout(()=> hideLoader(), 1800);
+}
+
+function setMarket(m) {
+  showLoader('Wechsle Markt…', `${m.label}`, 4200);
+  state.currentMarket = m;
+  document.getElementById('symbolLabel').innerText = m.tv;
+  if(tvWidget && typeof tvWidget.onChartReady === 'function') {
+    tvWidget.onChartReady(() => {
+      try{ tvWidget.setSymbol(m.tv, '15'); } catch(e){ console.warn('setSymbol failed', e); }
+      setTimeout(()=> hideLoader(), 450);
+    });
+  } else initTradingView(m.tv);
+  renderAll();
+}
+
+function startGlobalBinanceWS() {
+  if (binanceMultiWS) return; // schon verbunden
+
+  const streams = markets.map(m => `${m.binance}@trade`).join('/');
+  const url = `wss://stream.binance.com:9443/stream?streams=${streams}`;
+
+  binanceMultiWS = new WebSocket(url);
+
+  binanceMultiWS.onopen = () => {
+    wsOpen = true;
+    console.info('Binance multi-WS open');
+    // Falls CoinGecko-Fallback lief, stoppen wir ihn
+    if (cgInterval) { clearInterval(cgInterval); cgInterval = null; }
+    hideLoader();
+  };
+
+  binanceMultiWS.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      // Combined stream liefert { stream, data: {...} }
+      const data = msg.data || msg;
+      if (!data || !data.s) return;
+
+      const symbol = data.s.toLowerCase(); // z.B. "BTCUSDT" -> "btcusdt"
+      const price = Number(data.p);
+      const time = new Date(data.T || Date.now());
+
+      const market = markets.find(m => m.binance === symbol);
+      if (!market) return;
+
+      state.latestPrices[market.cg] = { price, time };
+
+      // kleines Optimierungs-Flag: only render when price changed
+      renderAll();
+    } catch (e) {
+      console.warn('WS message parse error', e);
+    }
+  };
+
+  binanceMultiWS.onclose = () => {
+    wsOpen = false;
+    binanceMultiWS = null;
+    console.warn('Binance multi-WS closed — starte Fallback / Reconnect');
+    scheduleCoinGeckoFallback();              // starte Fallback polling
+    setTimeout(startGlobalBinanceWS, 3000);   // reconnect versuchen
+  };
+
+  binanceMultiWS.onerror = (err) => {
+    console.error('Binance multi-WS error', err);
+    try { binanceMultiWS.close(); } catch(e){}
+  };
+}
+
+/* Binance WS fallback logic unchanged */
+
+let cgInterval = null;
+function scheduleCoinGeckoFallback() {
+  if(cgInterval) return;
+  fetchCoinGeckoOnce();
+  cgInterval = setInterval(fetchCoinGeckoOnce, 3000);
+}
+async function fetchCoinGeckoOnce() {
+  try {
+    const ids = markets.map(m=>m.cg).join(',');
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const now = new Date();
+    markets.forEach(m => {
+      const p = data[m.cg] && data[m.cg].usd ? Number(data[m.cg].usd) : 0;
+      state.latestPrices[m.cg] = { price: p, time: now };
+    });
+    renderAll(); hideLoader();
+  } catch(e) { console.warn('CoinGecko fetch failed', e); setTimeout(hideLoader, 900); }
+}
+
+/* UI render helpers */
+function formatCurrency(n) { return '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function formatSmall(n) { if(n === 0 || n === undefined) return '—'; return Number(n).toLocaleString(undefined, { maximumFractionDigits: 6 }); }
+
+function updateMarketList() {
+  const el = document.getElementById('marketList');
+  el.innerHTML = '';
+  markets.forEach(m => {
+    const p = state.latestPrices[m.cg];
+    const price = p ? p.price : 0;
+    const div = document.createElement('div');
+    div.className = 'market-row cursor-pointer ' + (state.currentMarket.cg === m.cg ? 'bg-[rgba(124,92,255,0.08)]' : '');
+    div.style.padding = '8px';
+    div.style.borderRadius = '8px';
+    div.innerHTML = `<div><div class="font-medium">${m.label}</div><div class="small muted">${m.cg}</div></div><div class="text-right"><div class="font-semibold">${price?formatCurrency(price):'—'}</div></div>`;
+    div.onclick = ()=> setMarket(m);
+    el.appendChild(div);
+  });
+}
+
+function updatePortfolioList() {
+  const el = document.getElementById('portfolioList');
+  el.innerHTML = '';
+  const keys = Object.keys(state.portfolio);
+  if(keys.length === 0) { el.innerText = 'Noch keine Positionen'; return; }
+  keys.forEach(k => {
+    const entry = state.portfolio[k];
+    const market = markets.find(m=>m.cg===k);
+    const price = state.latestPrices[k] ? state.latestPrices[k].price : 0;
+    const totalAmount = entry.lots.reduce((s,l)=>s + l.amount, 0);
+    const value = entry.lots.reduce((s,l)=>{
+      if(l.side === 'LONG') return s + l.amount * (price || l.buyPrice || 0);
+      else return s + l.amount * (l.sellPrice || 0); // for shorts show initial notional
+    },0);
+    const container = document.createElement('div');
+    container.className = 'p-2 rounded bg-[#061022] small-lot';
+    const maxLev = Math.max(...entry.lots.map(l => l.leverage || 1));
+let html = `<div class="flex justify-between items-start">
+  <div>
+    <strong>
+      ${market.label}
+      <span class="ml-1 text-xs muted">x${maxLev}</span>
+    </strong>
+    <div class="small muted">${k}</div>
+  </div>
+  <div class="text-right">
+    <div>${formatSmall(totalAmount)} coins</div>
+    <div class="small muted">${formatCurrency(value)}</div>
+  </div>
+</div>`;
+
+    entry.lots.forEach(lot => {
+      // unrealized per lot depends on side
+      let lotUnreal = 0;
+      if(price) {
+        if(lot.side === 'LONG') lotUnreal = (price - lot.buyPrice) * lot.amount;
+        else lotUnreal = (lot.sellPrice - price) * lot.amount; // short profit if price drops
+      }
+      const tpText = lot.tpPct ? `${lot.tpPct}% (${formatCurrency(lot.tpPrice)})` : '—';
+      const slText = lot.slPct ? `${lot.slPct}% (${formatCurrency(lot.slPrice)})` : '—';
+      html += `<div class="lot-row small">
+        <div><small>${new Date(lot.time).toLocaleString()}</small></div>
+        <div class="muted">Side: ${lot.side} • Amount: ${formatSmall(lot.amount)} • ${lot.side==='LONG'?'Buy':'Sell'}: ${lot.side==='LONG'?formatCurrency(lot.buyPrice):formatCurrency(lot.sellPrice)} • USD: ${formatCurrency(lot.usd)}</div>
+        <div class="${lotUnreal>=0?'green':'red'}">${lotUnreal>=0?'+':''}${formatCurrency(lotUnreal)}</div>
+        <div class="muted small">TP: ${tpText} • SL: ${slText}</div>
+        <div class="mt-2"><button class="px-2 py-1 bg-red-600 text-black rounded small" onclick="closeLot('${k}', ${lot.id})">Close Lot</button></div>
+      </div>`;
+    });
+    container.innerHTML = html;
+    el.appendChild(container);
+  });
+}
+
+function updatePositionBox() {
+  const el = document.getElementById('positionBox');
+  const k = state.currentMarket.cg;
+  const entry = state.portfolio[k];
+  if(!entry) { el.innerHTML = 'Keine offene Position'; return; }
+  const price = state.latestPrices[k] ? state.latestPrices[k].price : 0;
+  const totalAmount = entry.lots.reduce((s,l)=>s + l.amount, 0);
+  // compute weighted avg and combined unrealized across lots
+  let weightedSum = 0, unreal = 0, totalCoins = 0;
+  entry.lots.forEach(l => {
+    totalCoins += l.amount;
+    if(l.side === 'LONG') {
+      weightedSum += l.amount * l.buyPrice;
+      if(price) unreal += l.amount * (price - l.buyPrice);
+    } else {
+      weightedSum += l.amount * l.sellPrice;
+      if(price) unreal += l.amount * (l.sellPrice - price);
+    }
+  });
+  const weightedAvg = totalCoins ? (weightedSum / totalCoins) : 0;
+  el.innerHTML = `<div><div class="font-medium">${state.currentMarket.label}</div>
+    <div class="small muted">Amount total: ${formatSmall(totalAmount)} • Weighted Avg: ${formatCurrency(weightedAvg)}</div>
+    <div class="${unreal>=0 ? 'green' : 'red'}">${unreal>=0?'+':''}${formatCurrency(unreal)}</div></div>`;
+}
+// OPEN LONG (reserve Margin, support Leverage, TP/SL)
+function executeBuy() {
+  const usdRaw = Number(document.getElementById('usdInput').value);
+  const margin = toFixedNumber(usdRaw, 2);
+  if(!margin || margin <= 0) return alert('Bitte gültigen USD Betrag eingeben');
+  if(margin > state.balanceUSD + 1e-9) return alert('Nicht genug USD für Margin');
+  const price = getCurrentPriceForCurrentMarket();
+  if(!price) return alert('Kein Preis verfügbar');
+  const leverage = Math.max(1, Number(document.getElementById('leverage').value) || 1);
+  const notional = toFixedNumber(margin * leverage, 2);
+  const coins = toFixedNumber(notional / price, 8);
+  const cg = state.currentMarket.cg;
+  if(!state.portfolio[cg]) state.portfolio[cg] = { lots: [] };
+  const { tpPct, slPct } = readTpSl();
+  const lot = {
+    id: Date.now(),
+    amount: coins,
+    buyPrice: toFixedNumber(price, 8),
+    usd: margin,               // eingesetztes Eigenkapital
+    margin: margin,
+    leverage: leverage,
+    notional: notional,
+    side: 'LONG',
+    tpPct: tpPct || 0,
+    slPct: slPct || 0,
+    tpPrice: tpPct ? toFixedNumber(price * (1 + tpPct/100), 8) : null,
+    slPrice: slPct ? toFixedNumber(price * (1 - slPct/100), 8) : null,
+    time: Date.now()
+  };
+  state.portfolio[cg].lots.push(lot);
+  // reserve (block) margin from balance
+  state.balanceUSD = toFixedNumber(state.balanceUSD - margin, 2);
+  state.orderHistory.push({ side:'LONG_OPEN', market: state.currentMarket, price: toFixedNumber(price,8), usd: margin, coins: lot.amount, leverage: leverage, time: Date.now() });
+  saveState(); renderAll();
+}
+
+function updateStats() {
+  let lockedMargin = 0, unrealized = 0;
+  for(const k in state.portfolio) {
+    const entry = state.portfolio[k];
+    const price = state.latestPrices[k] ? state.latestPrices[k].price : (entry.lots[0] && (entry.lots[0].buyPrice||entry.lots[0].sellPrice)) || 0;
+    entry.lots.forEach(l => {
+      lockedMargin += Number(l.margin || 0);
+      if(price) {
+        if(l.side === 'LONG') unrealized += l.amount * (price - l.buyPrice);
+        else unrealized += l.amount * (l.sellPrice - price);
+      }
+    });
+  }
+  const positionsValue = lockedMargin; // we show locked margin as positions value
+  document.getElementById('netWorth').innerText = formatCurrency(toFixedNumber(state.balanceUSD + lockedMargin + unrealized, 2));
+  document.getElementById('realizedPnL').innerText = formatCurrency(state.realizedPnL);
+  document.getElementById('positionValue').innerText = formatCurrency(lockedMargin);
+  const cur = state.portfolio[state.currentMarket.cg];
+  if(cur) {
+    const totalAmount = cur.lots.reduce((s,l)=>s + l.amount, 0);
+    const weightedAvg = totalAmount ? (cur.lots.reduce((s,l)=>s + l.amount*(l.side==='LONG'?l.buyPrice:l.sellPrice),0) / totalAmount) : 0;
+    document.getElementById('avgPrice').innerText = formatCurrency(weightedAvg);
+  } else document.getElementById('avgPrice').innerText = '—';
+  const p = state.latestPrices[state.currentMarket.cg];
+  document.getElementById('priceLabel').innerText = p && p.price ? formatCurrency(p.price) : '—';
+  document.getElementById('priceTime').innerText = p && p.time ? p.time.toLocaleTimeString() : '';
+  if (!isEditingBalance) {
+    document.getElementById('balanceDisplay').innerText = formatCurrency(state.balanceUSD);
+  }
+
+  const k = state.currentMarket.cg;
+  const entry = state.portfolio[k];
+  if(entry) {
+    let u = 0;
+    const price = state.latestPrices[k] ? state.latestPrices[k].price : 0;
+    entry.lots.forEach(l => {
+      if(price) {
+        if(l.side==='LONG') u += l.amount * (price - l.buyPrice);
+        else u += l.amount * (l.sellPrice - price);
+      }
+    });
+    const el = document.getElementById('unrealizedDisplay');
+    el.className = u>=0 ? 'text-lg font-semibold green' : 'text-lg font-semibold red';
+    el.innerText = (u>=0?'+':'') + formatCurrency(u);
+  } else {
+    document.getElementById('unrealizedDisplay').innerText = '—';
+    document.getElementById('unrealizedDisplay').className = '';
+  }
+}
+
+
+function updateOrderHistory() {
+  const el = document.getElementById('orderHistory');
+  if(state.orderHistory.length === 0) { el.innerText = 'Noch keine Orders'; return; }
+  el.innerHTML = state.orderHistory.slice().reverse().map(o => {
+    const lev = o.leverage ? ` • Lev: x${o.leverage}` : '';
+    const usdText = o.usd !== undefined ? formatCurrency(o.usd) : '—';
+    return `<div class="mb-2 p-2 rounded bg-[#061022] small">
+      <div><strong>${o.side}</strong> ${o.market.label} • ${formatCurrency(o.price)} • ${o.coins.toFixed(6)} coins • ${usdText}${lev}</div>
+      <div class="muted">${new Date(o.time).toLocaleString()}</div>
+    </div>`;
+  }).join('');
+}
+
+
+function renderAll() {
+  updateMarketList();
+  updatePortfolioList();
+  updatePositionBox();
+  updateStats();
+  updateOrderHistory();
+  saveState();
+}
+
+/* ===========================
+   Trading operations (mit TP/SL & Long/Short)
+   - PosType select steuert Verhalten:
+     - LONG: BUY = open long, SELL = close long (wie vorher)
+     - SHORT: SELL = open short, BUY = close short (Sell to open / Buy to close)
+   - TP/SL in Prozent (z.B. 2 = 2%)
+   =========================== */
+
+function quickPctBuy(pct) {
+  const usd = (state.balanceUSD * pct / 100);
+  document.getElementById('usdInput').value = Math.max(0, Math.floor(usd*100)/100);
+}
+function getCurrentPriceForCurrentMarket() {
+  const cg = state.currentMarket.cg;
+  const p = state.latestPrices[cg];
+  if(p && p.price) return p.price;
+  return null;
+}
+
+/* Hilfsfunktion: liest TP/SL Inputs */
+function readTpSl() {
+  const tpRaw = Number(document.getElementById('tpInput').value);
+  const slRaw = Number(document.getElementById('slInput').value);
+  const tpPct = isFinite(tpRaw) && tpRaw > 0 ? tpRaw : 0;
+  const slPct = isFinite(slRaw) && slRaw > 0 ? slRaw : 0;
+  return { tpPct, slPct };
+}
+
+/* Klick-Handler für Buttons (keine UI-Änderung nötig) */
+function onBuyClick() {
+  const posType = document.getElementById('posType').value;
+  if(posType === 'LONG') executeBuy();    // open long
+  else executeBuyShortClose();             // close short (buy to close)
+}
+function onSellClick() {
+  const posType = document.getElementById('posType').value;
+  if(posType === 'LONG') executeSell();   // close long (sell to close)
+  else executeSellToOpenShort();           // open short (sell to open)
+}
+
+/* BUY to open LONG (wie vorher, erweitert um tp/sl) */
+function executeBuyShortClose() {
+  const usdRaw = Number(document.getElementById('usdInput').value);
+  const usdToSpend = toFixedNumber(usdRaw, 2);
+  if(!usdToSpend || usdToSpend <= 0) return alert('Bitte gültigen USD Betrag eingeben');
+  const price = getCurrentPriceForCurrentMarket();
+  if(!price) return alert('Kein Preis verfügbar');
+  let coinsToBuy = toFixedNumber(usdToSpend / price, 8);
+  const cg = state.currentMarket.cg;
+  const entry = state.portfolio[cg];
+  if(!entry || entry.lots.length === 0) return alert('Keine Short-Positionen vorhanden');
+  const totalShort = entry.lots.reduce((s,l) => s + (l.side==='SHORT'?l.amount:0), 0);
+  if(coinsToBuy > totalShort + 1e-12) return alert('Nicht genug Short-Coins (Anzahl überschreitet Short-Positionen)');
+  let totalUsdCost = 0, totalCoinsClosed = 0, totalMarginReturned = 0;
+  while(coinsToBuy > 1e-12 && entry.lots.length) {
+    const lot = entry.lots[0];
+    if(lot.side !== 'SHORT') { entry.lots.push(entry.lots.shift()); continue; }
+    if(coinsToBuy >= lot.amount - 1e-12) {
+      const buyAmt = lot.amount;
+      const cost = toFixedNumber(buyAmt * price, 2);
+      const realized = toFixedNumber(buyAmt * (lot.sellPrice - price), 2);
+      // return proportional margin
+      const marginReturn = toFixedNumber(lot.margin, 2);
+      state.realizedPnL = toFixedNumber(state.realizedPnL + realized, 2);
+      totalUsdCost = toFixedNumber(totalUsdCost + cost, 2);
+      totalCoinsClosed = toFixedNumber(totalCoinsClosed + buyAmt, 8);
+      totalMarginReturned = toFixedNumber(totalMarginReturned + marginReturn, 2);
+      coinsToBuy = toFixedNumber(coinsToBuy - buyAmt, 8);
+      entry.lots.shift();
+    } else {
+      const buyAmt = coinsToBuy;
+      const cost = toFixedNumber(buyAmt * price, 2);
+      const realized = toFixedNumber(buyAmt * (lot.sellPrice - price), 2);
+      const proRataMargin = toFixedNumber(lot.margin * (buyAmt / (lot.amount + 0)), 2);
+      state.realizedPnL = toFixedNumber(state.realizedPnL + realized, 2);
+      totalUsdCost = toFixedNumber(totalUsdCost + cost, 2);
+      totalCoinsClosed = toFixedNumber(totalCoinsClosed + buyAmt, 8);
+      totalMarginReturned = toFixedNumber(totalMarginReturned + proRataMargin, 2);
+      lot.amount = toFixedNumber(lot.amount - buyAmt, 8);
+      lot.margin = toFixedNumber(lot.margin - proRataMargin, 2);
+      coinsToBuy = 0;
+    }
+  }
+  // pay USD cost to buy back
+  if(totalUsdCost > state.balanceUSD + 1e-9) return alert('Nicht genug USD, um Short zu schließen (Kontostand zu niedrig)');
+  // deduct cost, return margin + realized PnL
+  state.balanceUSD = toFixedNumber(state.balanceUSD - totalUsdCost + totalMarginReturned + 0, 2);
+  state.orderHistory.push({ side:'SHORT_CLOSE', market: state.currentMarket, price: toFixedNumber(price,8), usd: -totalUsdCost + totalMarginReturned, coins: totalCoinsClosed, time: Date.now() });
+  if(entry.lots.length === 0) delete state.portfolio[cg];
+  saveState(); renderAll();
+}
+
+
+
+/* SELL to close LONG (wie vorher, schließt Lots FIFO) */
+function executeSell() {
+  const usdRaw = Number(document.getElementById('usdInput').value);
+  const usdRequested = toFixedNumber(usdRaw, 2);
+  if(!usdRequested || usdRequested <= 0) return alert('Bitte gültigen USD Betrag eingeben');
+  const price = getCurrentPriceForCurrentMarket();
+  if(!price) return alert('Kein Preis verfügbar');
+  let coinsToSell = toFixedNumber(usdRequested / price, 8);
+  const cg = state.currentMarket.cg;
+  const entry = state.portfolio[cg];
+  if(!entry || entry.lots.length === 0) return alert('Keine Coins vorhanden');
+  const totalAvail = entry.lots.reduce((s,l) => s + (l.side==='LONG'?l.amount:0), 0);
+  if(coinsToSell > totalAvail + 1e-12) return alert('Nicht genug Coins (nur Long lots können verkauft werden)');
+  let totalCoinsSold = 0, totalMarginReturned = 0, totalRealized = 0;
+  while(coinsToSell > 1e-12 && entry.lots.length) {
+    const lot = entry.lots[0];
+    if(lot.side !== 'LONG') { entry.lots.push(entry.lots.shift()); continue; }
+    if(coinsToSell >= lot.amount - 1e-12) {
+      const soldAmt = lot.amount;
+      const realized = toFixedNumber(soldAmt * (price - lot.buyPrice), 2);
+      const marginReturn = toFixedNumber(lot.margin, 2);
+      totalRealized = toFixedNumber(totalRealized + realized, 2);
+      totalCoinsSold = toFixedNumber(totalCoinsSold + soldAmt, 8);
+      totalMarginReturned = toFixedNumber(totalMarginReturned + marginReturn, 2);
+      coinsToSell = toFixedNumber(coinsToSell - soldAmt, 8);
+      entry.lots.shift();
+    } else {
+      const soldAmt = coinsToSell;
+      const realized = toFixedNumber(soldAmt * (price - lot.buyPrice), 2);
+      const proRataMargin = toFixedNumber(lot.margin * (soldAmt / (lot.amount + 0)), 2);
+      totalRealized = toFixedNumber(totalRealized + realized, 2);
+      totalCoinsSold = toFixedNumber(totalCoinsSold + soldAmt, 8);
+      totalMarginReturned = toFixedNumber(totalMarginReturned + proRataMargin, 2);
+      lot.amount = toFixedNumber(lot.amount - soldAmt, 8);
+      lot.margin = toFixedNumber(lot.margin - proRataMargin, 2);
+      coinsToSell = 0;
+    }
+  }
+  // return margin + realized PnL to balance
+  state.realizedPnL = toFixedNumber(state.realizedPnL + totalRealized, 2);
+  state.balanceUSD = toFixedNumber(state.balanceUSD + totalMarginReturned + totalRealized, 2);
+  if(entry.lots.length === 0) delete state.portfolio[cg];
+  state.orderHistory.push({ side:'LONG_CLOSE', market: state.currentMarket, price: toFixedNumber(price,8), usd: totalMarginReturned + totalRealized, coins: totalCoinsSold, time: Date.now() });
+  saveState(); renderAll();
+}
+
+
+/* SELL to OPEN SHORT:
+   - we "sell" borrowed coins at current price: receive USD proceeds immediately
+   - a short lot is stored with sellPrice and amount (we owe coins later)
+*/
+function executeSellToOpenShort() {
+  const usdRaw = Number(document.getElementById('usdInput').value);
+  const margin = toFixedNumber(usdRaw, 2);
+  if(!margin || margin <= 0) return alert('Bitte gültigen USD Betrag eingeben');
+  if(margin > state.balanceUSD + 1e-9) return alert('Nicht genug USD für Margin');
+  const price = getCurrentPriceForCurrentMarket();
+  if(!price) return alert('Kein Preis verfügbar');
+  const leverage = Math.max(1, Number(document.getElementById('leverage').value) || 1);
+  const notional = toFixedNumber(margin * leverage, 2);
+  const coins = toFixedNumber(notional / price, 8);
+  const cg = state.currentMarket.cg;
+  if(!state.portfolio[cg]) state.portfolio[cg] = { lots: [] };
+  const { tpPct, slPct } = readTpSl();
+  const lot = {
+    id: Date.now(),
+    amount: coins,
+    sellPrice: toFixedNumber(price, 8),
+    usd: margin,           // margin collateral
+    margin: margin,
+    leverage: leverage,
+    notional: notional,
+    side: 'SHORT',
+    tpPct: tpPct || 0,
+    slPct: slPct || 0,
+    tpPrice: tpPct ? toFixedNumber(price * (1 - tpPct/100), 8) : null,
+    slPrice: slPct ? toFixedNumber(price * (1 + slPct/100), 8) : null,
+    time: Date.now()
+  };
+  state.portfolio[cg].lots.push(lot);
+  // reserve margin
+  state.balanceUSD = toFixedNumber(state.balanceUSD - margin, 2);
+  state.orderHistory.push({ side:'SHORT_OPEN', market: state.currentMarket, price: toFixedNumber(price,8), usd: margin, coins: lot.amount, leverage: leverage, time: Date.now() });
+  saveState(); renderAll();
+}
+
+
+/* Close single lot (manuell) - jetzt unterstützt LONG & SHORT */
+function closeLot(cg, lotId) {
+  const entry = state.portfolio[cg];
+  if(!entry) return alert('Keine Position');
+  const idx = entry.lots.findIndex(l => l.id === lotId);
+  if(idx === -1) return alert('Lot nicht gefunden');
+  const lot = entry.lots[idx];
+  const price = getCurrentPriceForCurrentMarket();
+  if(!price) return alert('Kein Preis verfügbar zum Schließen');
+
+  // --- Partial Close ---
+  let percentToClose = parseFloat(prompt("Wie viel Prozent der Position schließen? (0-100)"));
+  if(isNaN(percentToClose) || percentToClose <= 0 || percentToClose > 100) {
+    return alert("Ungültiger Wert");
+  }
+  percentToClose = percentToClose / 100;
+  const closeAmount = lot.amount * percentToClose;
+
+  if(lot.side === 'LONG') {
+    const realized = toFixedNumber(closeAmount * (price - lot.buyPrice), 2);
+    const marginReturn = toFixedNumber(lot.margin * percentToClose, 2);
+
+    state.realizedPnL = toFixedNumber(state.realizedPnL + realized, 2);
+    state.balanceUSD = toFixedNumber(state.balanceUSD + marginReturn + realized, 2);
+
+    lot.amount -= closeAmount;
+    lot.margin -= marginReturn;
+
+    state.orderHistory.push({
+      side: 'LONG_CLOSE',
+      market: markets.find(m => m.cg === cg),
+      price: toFixedNumber(price, 8),
+      usd: marginReturn + realized,
+      coins: closeAmount,
+      time: Date.now()
+    });
+
+    if(lot.amount <= 0) entry.lots.splice(idx,1);
+
+  } else { // SHORT
+    const usdCost = toFixedNumber(closeAmount * price, 2);
+    const realized = toFixedNumber(closeAmount * (lot.sellPrice - price), 2);
+    const marginReturn = toFixedNumber(lot.margin * percentToClose, 2);
+
+    state.realizedPnL = toFixedNumber(state.realizedPnL + realized, 2);
+    state.balanceUSD = toFixedNumber(state.balanceUSD - usdCost + marginReturn + realized, 2);
+
+    lot.amount -= closeAmount;
+    lot.margin -= marginReturn;
+
+    state.orderHistory.push({
+      side: 'SHORT_CLOSE',
+      market: markets.find(m => m.cg === cg),
+      price: toFixedNumber(price, 8),
+      usd: -usdCost + marginReturn + realized,
+      coins: closeAmount,
+      time: Date.now()
+    });
+
+    if(lot.amount <= 0) entry.lots.splice(idx,1);
+  }
+
+  if(entry.lots.length === 0) delete state.portfolio[cg];
+  saveState();
+  renderAll();
+}
+
+
+
+/* ===========================
+   Auto-close checker for TP/SL
+   - läuft regelmäßig und prüft alle Lots
+   - schließt Lot automatisch (mit derselben Logik wie manuelles Schließen)
+   =========================== */
+function checkAutoClosures() {
+  for(const k in state.portfolio) {
+    const entry = state.portfolio[k];
+    const priceObj = state.latestPrices[k];
+    if(!priceObj || !priceObj.price) continue;
+    const price = priceObj.price;
+    // iterate copy because we may mutate array
+    const lotsCopy = entry.lots.slice();
+    for(const lot of lotsCopy) {
+      if(lot.side === 'LONG') {
+        if(lot.tpPrice && price >= lot.tpPrice) {
+          // take profit long
+          autoCloseLot(k, lot.id, 'TP');
+        } else if(lot.slPrice && price <= lot.slPrice) {
+          // stop loss long
+          autoCloseLot(k, lot.id, 'SL');
+        }
+      } else if(lot.side === 'SHORT') {
+        if(lot.tpPrice && price <= lot.tpPrice) {
+          // take profit short (price fell)
+          autoCloseLot(k, lot.id, 'TP');
+        } else if(lot.slPrice && price >= lot.slPrice) {
+          // stop loss short (price rose)
+          autoCloseLot(k, lot.id, 'SL');
+        }
+      }
+    }
+  }
+}
+
+function autoCloseLot(cg, lotId, reason) {
+  const entry = state.portfolio[cg];
+  if(!entry) return;
+  const idx = entry.lots.findIndex(l => l.id === lotId);
+  if(idx === -1) return;
+  const lot = entry.lots[idx];
+  const price = state.latestPrices[cg] ? state.latestPrices[cg].price : null;
+  if(!price) return;
+  if(lot.side === 'LONG') {
+    const realized = toFixedNumber(lot.amount * (price - lot.buyPrice), 2);
+    const marginReturn = toFixedNumber(lot.margin, 2);
+    state.realizedPnL = toFixedNumber(state.realizedPnL + realized, 2);
+    state.balanceUSD = toFixedNumber(state.balanceUSD + marginReturn + realized, 2);
+    entry.lots.splice(idx,1);
+    state.orderHistory.push({ side:'LONG_AUTO_'+reason, market: markets.find(m=>m.cg===cg), price: toFixedNumber(price,8), usd: marginReturn + realized, coins: lot.amount, time: Date.now() });
+  } else {
+    // short auto-close: buy back
+    const usdCost = toFixedNumber(lot.amount * price, 2);
+    const realized = toFixedNumber(lot.amount * (lot.sellPrice - price), 2);
+    const marginReturn = toFixedNumber(lot.margin, 2);
+    // allow forced close even if not enough balance (simulate margin call): pay cost, then give back margin + realized
+    state.realizedPnL = toFixedNumber(state.realizedPnL + realized, 2);
+    state.balanceUSD = toFixedNumber(state.balanceUSD - usdCost + marginReturn + realized, 2);
+    entry.lots.splice(idx,1);
+    state.orderHistory.push({ side:'SHORT_AUTO_'+reason, market: markets.find(m=>m.cg===cg), price: toFixedNumber(price,8), usd: -usdCost + marginReturn + realized, coins: lot.amount, time: Date.now() });
+  }
+  if(entry.lots.length === 0) delete state.portfolio[cg];
+  saveState(); renderAll();
+}
+
+
+/* init */
+function init() {
+  loadState();
+  updateDeviceClass();
+  startGlobalBinanceWS();
+  initTradingView(state.currentMarket.tv);
+  setTimeout(()=> setMarket(state.currentMarket), 800);
+  // <-- removed: startBinanceWS(...) wird nicht mehr gebraucht
+  setInterval(()=> { if(!wsOpen && !cgInterval) fetchCoinGeckoOnce(); }, 3000); // optional: kann bleiben, aber wsOpen wird jetzt richtig gesetzt
+  setInterval(renderAll, 800);
+  // Auto-closure checker (TP/SL)
+  setInterval(checkAutoClosures, 1000);
+}
+
+
+window.addEventListener('load', () => {
+  showLoader('Starte KTS…', 'Chart & Preise werden geladen', 4200);
+  init();
+});
+</script>
+</body>
+</html>
